@@ -3,17 +3,13 @@ Base classes and functions for creating new Metanode classes.
 """
 
 from collections import OrderedDict
-import config
 import inspect
 import json
 
-import maya.api.OpenMaya
+import maya.api.OpenMaya as om2
 import pymel.core as pm
 
-NODE_TYPE = 'network'
-META_TYPE = 'metaType'
-META_VERSION = 'metaVersion'
-LINEAL_VERSION = 'linealVersion'
+from meta.config import *
 
 
 class Register(type):
@@ -41,7 +37,7 @@ class Metanode(object):
             raise Exception("{0} isn't a Metanode".format(node))
 
         meta_type = node.attr(META_TYPE).get()
-        if meta_type != self.meta_type and meta_type not in config.META_TO_RELINK.keys():
+        if meta_type != self.meta_type and meta_type not in META_TO_RELINK.keys():
             if meta_type not in Register.__meta_types__.keys():
                 raise Exception('{0} has an invalid meta type of {1}'.format(node, meta_type))
 
@@ -132,6 +128,14 @@ class Metanode(object):
         metas = [node for node in pm.ls(type=NODE_TYPE) if node.hasAttr(META_TYPE)]
         class_type = [cls(node) for node in metas if node.attr(META_TYPE).get() == cls.meta_type]
         return class_type
+
+    def created_event(self):
+        """Override to call created event."""
+        pass
+
+    def deleted_event(self):
+        """Override to call deleted event."""
+        pass
 
     def is_orphaned(self):
         """
@@ -546,300 +550,9 @@ def deserialize_metanode(data, node=None, json_format=True, verify_version=True,
     return metanode
 
 
-class MetanodeManager(object):
-    """
-    Manager class for storing state, and managing updates with recognized Metanodes in a scene.
-    """
-    meta_dict, network_nodes, relink, singleton, orphaned, update, deprecated = {}, [], [], [], [], [], []
-    createdMObjs = []
-
-    def __init__(self):
-        self.update_network_nodes()
-
-    @staticmethod
-    def network_node_created_callback(m_obj, *args):
-        """
-        catches all network nodes that are created.
-        Defer evaluates network node with metanodeCreatedCallback so that network nodes have time to be inited as metas.
-
-        :param m_obj:
-        :param args:
-        :return:
-        """
-        MetanodeManager.createdMObjs.append(m_obj)
-        pm.evalDeferred('my.core.meta.MetanodeManager.metanodeCreatedCallback()')
-
-    @staticmethod
-    def metanode_created_callback():
-        """
-        Catches all network nodes that are meta types. If they aren't in the meta dictionary they will be added.
-        Should only apply to copied meta nodes and imported meta nodes as they dont go through the normal meta node
-        create function. Always runs deferred, therefore this will not reliably catch metas from a batch process.
-        If this is needed look at using updateMetaDictionary from your batch
-        (scene load/new will also run updateMetaDictionary.
-        """
-        m_obj = MetanodeManager.createdMObjs.pop(0)
-        m_objs_uuid = maya.api.OpenMaya.MFnDependencyNode(m_obj).uuid()
-        if m_objs_uuid.valid():
-            uuid = m_objs_uuid.asString()
-            nodes = pm.ls(uuid)
-            if nodes:
-                if pm.hasAttr(nodes[0], META_TYPE):
-                    if nodes[0].attr(META_TYPE).get() in Register.__meta_types__.keys():
-                        metanode_type = eval(nodes[0].attr(META_TYPE).get())
-                        if all(meta.uuid != uuid for meta in
-                               MetanodeManager.meta_dict.get(metanode_type.metatype, [])):
-                            if not MetanodeManager.meta_dict.has_key(metanode_type.metatype):
-                                MetanodeManager.meta_dict[metanode_type.metatype] = []
-                            new_meta = metanode_type(nodes[0])
-                            MetanodeManager.meta_dict[metanode_type.metatype].append(new_meta)
-                            new_meta.createdEvent()
-
-    @staticmethod
-    def metanode_deleted_callback(m_obj, *args):
-        uuid = maya.api.OpenMaya.MFnDependencyNode(m_obj).uuid().asString()
-        for key, value in MetanodeManager.meta_dict.iteritems():
-            for meta in value:
-                if meta.uuid == uuid:
-                    value.remove(meta)
-                    meta.deletedEvent()
-                    break
-
-    @classmethod
-    def update_meta_dictionary(cls):
-        """
-        Updates meta dictionary with any meta nodes found in scene, not yet in the dictionary. Runs when scene loads.
-        Should only need to be run when normal metanodeCreatedCallback cant catch a new meta node.
-        This can happen when differed events aren't processed such as in a batch file open with an import
-         of meta nodes from another file.
-        """
-        update_meta_dictionary = get_scene_metanodes()
-        for update_meta_type, updateMetaList in update_meta_dictionary.iteritems():
-            cls.meta_dict.setdefault(update_meta_type, [])
-            for updateMeta in updateMetaList:
-                if all(updateMeta.uuid != meta.uuid for meta in cls.meta_dict[update_meta_type]):
-                    cls.meta_dict[update_meta_type].append(updateMeta)
-                    updateMeta.createdEvent()
-
-    @classmethod
-    def update_network_nodes(cls):
-        cls.network_nodes = [node for node in pm.ls(type=NODE_TYPE) if pm.hasAttr(node, META_TYPE)]
-
-    @classmethod
-    def get_invalid_nodes(cls):
-        """
-        Check all lists for nodes to fix.
-        """
-        return cls.relink + cls.singleton + cls.orphaned + cls.update + cls.deprecated
-
-    def validate_metanodes(self):
-        """
-        Query metaDictionary and networkNodes for nodes to fix. This only gathers the nodes without fixing them.
-        """
-        self.get_relink()
-        self.get_extra_singletons()
-        self.get_orphaned()
-        self.get_nodes_to_update()
-        self.get_deprecated()
-
-    def recursive_metanode_fix(self):
-        """
-        Call fixMetanodes then validateMetanodes until all issues are caught.
-        """
-        msg = ''
-        while self.get_invalid_nodes():
-            msg += self.fix_metanodes()
-            self.validate_metanodes()
-        return msg
-
-    def fix_metanodes(self):
-        """
-        Execute all fix functions on gathered Metanodes.
-        """
-        msg = ''
-        if self.relink:
-            msg += self.update_relink()
-        if self.singleton:
-            msg += self.delete_extra_singletons()
-        if self.orphaned:
-            msg += self.delete_orphaned()
-        if self.update:
-            msg += self.update_metanodes()
-        if self.deprecated:
-            msg += self.delete_deprecated_meta_types()
-        return msg
-
-    @classmethod
-    def _delete_metas(cls, metanodes, message_base):
-        """
-        Delete passed Metanodes and return message.
-
-        :param list metanodes: list of meta classes
-        :param string message_base: Message about why the Metanode was deleted
-        :return string: Description of Metanodes deleted.
-        """
-        message = ''
-        for meta in reversed(metanodes):
-            metanodes.remove(meta)
-            cls.network_nodes.remove(meta.node)
-            message += '{0}: {1}\n'.format(message_base, meta.name)
-            pm.lockNode(meta.node, lock=False)
-            pm.disconnectAttr(meta.node)
-            pm.delete(meta.node)
-        return message
-
-    @classmethod
-    def _delete_nodes(cls, nodes, message_base):
-        """
-        Delete passed nodes and return message.
-
-        :param list nodes: list of network nodes
-        :param string message_base: Message about why the node was deleted
-        :return string: Description of nodes deleted.
-        """
-        message = ''
-        for node in reversed(nodes):
-            cls.network_nodes.remove(node)
-            message += '{0}: {1}\n'.format(message_base, node.name())
-            pm.lockNode(node, lock=False)
-            pm.disconnectAttr(node)
-            pm.delete(node)
-            nodes.remove(node)
-        return message
-
-    # RELINK
-    @classmethod
-    def get_relink(cls):
-        """
-        Check network nodes for meta types to relink.
-        """
-        relink_dict = config.META_TO_RELINK
-        for oldType, newType in relink_dict.iteritems():
-            cls.relink = [node for node in cls.network_nodes if node.attr(META_TYPE).get() == oldType]
-
-    @classmethod
-    def update_relink(cls):
-        """
-        Iterate through cls.relink to relink meta types that have been moved or renamed.
-
-        :return: String of relinked meta
-        """
-        relink_message = ''
-        relink_dict = config.META_TO_RELINK
-        for item in list(cls.relink):
-            relink_message += 'Relinked outdated Metanode: {0}\n'.format(item.name())
-            item.attr(META_TYPE).unlock()
-            item.attr(META_TYPE).set(relink_dict[item.attr(META_TYPE).get()])
-            item.attr(META_TYPE).lock()
-            cls.relink.remove(item)
-        return relink_message
-
-    # Extra SINGLETON
-    @classmethod
-    def get_extra_singletons(cls):
-        """
-        Collect extra singleton nodes that are not the recognized instance.
-        """
-        cls.singleton = []
-        class_dictionary = Register.__meta_types__
-        for meta_type in cls.meta_dict:
-            if issubclass(class_dictionary[meta_type], SingletonMetanode):
-                if len(cls.meta_dict[meta_type]) > 1:
-                    instance_meta = class_dictionary[meta_type].instance()
-                    for singleton in cls.meta_dict[meta_type]:
-                        if singleton.node != instance_meta.node:
-                            cls.singleton.append(singleton)
-
-    @classmethod
-    def delete_extra_singletons(cls):
-        """
-        Delete any extra singleton nodes.
-
-        :return string: message about what nodes were deleted
-        """
-        return cls._delete_metas(cls.singleton, 'Deleted duplicate singleton Metanode')
-
-    # ORPHANED
-    @classmethod
-    def get_orphaned(cls):
-        """
-        Collect metanodes in the metaDictionary that are orphaned.
-        """
-        cls.orphaned = []
-        for meta_type in cls.meta_dict:
-            for metaNode in cls.meta_dict[meta_type]:
-                if metaNode.isOrphaned():
-                    cls.orphaned.append(metaNode)
-
-    @classmethod
-    def delete_orphaned(cls):
-        """
-        Delete all nodes in the cls.orphaned list.
-
-        :return string: message about what Metanodes were deleted
-        """
-        return cls._delete_metas(cls.orphaned, 'Deleted orphaned Metanode')
-
-    # UPDATE
-    @classmethod
-    def get_nodes_to_update(cls, force=False):
-        """
-        Find meta nodes with meta types in META_TO_CHECK that should be updated.
-
-        :param force: force all Metanodes to be added
-        :return: list of meta nodes to update
-        """
-        cls.update = []
-        for meta_type in config.META_TO_CHECK:
-            if not len(cls.meta_dict.get(meta_type, [])):
-                continue
-            for meta in cls.meta_dict[meta_type]:
-                if meta.node.attr(META_TYPE).get() != meta_type:
-                    cls.update.append(meta)
-                elif meta.linealVersion() < meta.calculateLinealVersion() or force:
-                    cls.update.append(meta)
-
-    @classmethod
-    def update_metanodes(cls):
-        """
-        Call .update() on all metanodes in cls.update and return update messages.
-        """
-        update_message = ''
-        for meta in reversed(cls.update):
-            cls.update.remove(meta)
-            if pm.objExists(meta.node):
-                cls.network_nodes.remove(meta.node)
-                new, missing, could_not_set = meta.update()
-                if new:
-                    cls.network_nodes.append(new.node)
-                    update_message += 'Updating Metanode: {0}\n'.format(new)
-                if missing:
-                    update_message += 'New Metanode lacks previous attributes: {0}'.format(missing)
-                if could_not_set:
-                    update_message += 'Could not set attributes: {0}'.format(could_not_set)
-
-        return update_message
-
-    # DEPRECATED
-    @classmethod
-    def get_deprecated(cls):
-        """
-        Find meta nodes with meta types in META_TO_REMOVE that should be deleted and add them to cls.deprecated
-        """
-        deprecated_types = config.META_TO_REMOVE
-        cls.deprecated = [node for node in cls.network_nodes if node.attr(META_TYPE).get() in deprecated_types]
-
-    @classmethod
-    def delete_deprecated_meta_types(cls):
-        """
-        Delete nodes in cls.deprecated and return a message of all deleted nodes.
-        """
-        return cls._delete_nodes(cls.deprecated, 'Deleted deprecated Metanode')
-
-
 def get_object_uuid(node):
     """Get PyNode UUID value as string."""
-    sel_list = maya.api.OpenMaya.MSelectionList()
+    sel_list = om2.MSelectionList()
     sel_list.add(node.name())
     m_obj = sel_list.getDependNode(0)
-    return maya.api.OpenMaya.MFnDependencyNode(m_obj).uuid().asString()
+    return om2.MFnDependencyNode(m_obj).uuid().asString()
