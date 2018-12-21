@@ -11,8 +11,12 @@ class MetanodeManager(object):
     """
     Manager class for storing state, and managing updates with recognized Metanodes in a scene.
     """
-    meta_dict, network_nodes, relink, singleton, orphaned, update, deprecated = {}, [], [], [], [], [], []
-    created_m_objs = []
+    meta_dict = dict()
+    network_nodes, relink, singleton, orphaned, update, deprecated = [], [], [], [], [], []
+    created_m_objs, callbacks = [], set()
+    create_event, destroy_event = 'metanode_created', 'metanode_destroyed'
+    om2.MUserEventMessage.registerUserEvent(create_event)
+    om2.MUserEventMessage.registerUserEvent(destroy_event)
 
     def __init__(self):
         self.update_network_nodes()
@@ -53,6 +57,7 @@ class MetanodeManager(object):
                                 cls.meta_dict[metanode_class.meta_type] = []
                             new_meta = metanode_class(nodes[0])
                             cls.meta_dict[metanode_class.meta_type].append(new_meta)
+                            om2.MUserEventMessage.postUserEvent(cls.create_event, (metanode_class.meta_type, new_meta))
                             new_meta.created_event()
 
     @classmethod
@@ -68,8 +73,26 @@ class MetanodeManager(object):
             for metanode in value:
                 if metanode.uuid == uuid:
                     value.remove(metanode)
+                    om2.MUserEventMessage.postUserEvent(cls.destroy_event, (metanode.meta_type, metanode))
                     metanode.deleted_event()
                     break
+
+    @classmethod
+    def subscribe_create(cls, func):
+        index = om2.MUserEventMessage.addUserEventCallback(cls.create_event, func)
+        cls.callbacks.add(index)
+        return index
+
+    @classmethod
+    def subscribe_destroy(cls, func):
+        index = om2.MUserEventMessage.addUserEventCallback(cls.destroy_event, func)
+        cls.callbacks.add(index)
+        return index
+
+    @classmethod
+    def unsubscribe(cls, callback):
+        cls.callbacks.remove(callback)
+        om2.MMessage.removeCallback(callback)
 
     @classmethod
     def update_meta_dictionary(cls):

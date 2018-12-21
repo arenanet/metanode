@@ -17,9 +17,12 @@ class Register(type):
     __meta_types__ = {}
 
     def __init__(cls, *args, **kwargs):
+        super(Register, cls).__init__(*args, **kwargs)
         fully_qualified = cls.__module__ + '.' + cls.__name__
         cls.__class__.__meta_types__[fully_qualified] = cls
         cls.meta_type = fully_qualified
+        cls.events = dict()
+        cls.callbacks = dict()
 
 
 class Metanode(object):
@@ -48,6 +51,8 @@ class Metanode(object):
 
         self.node = node
         self.uuid = get_object_uuid(node)
+        self.attr_user_event = '{0}_attrChanged'.format(self.uuid)
+        self.name_user_event = '{0}_nameChanged'.format(self.uuid)
 
     def __repr__(self):
         return '{0}.{1}({2!r})'.format(self.__class__.__module__, self.__class__.__name__, self.name)
@@ -128,14 +133,6 @@ class Metanode(object):
         metas = [node for node in pm.ls(type=NODE_TYPE) if node.hasAttr(META_TYPE)]
         class_type = [cls(node) for node in metas if node.attr(META_TYPE).get() == cls.meta_type]
         return class_type
-
-    def created_event(self):
-        """Override to call created event."""
-        pass
-
-    def deleted_event(self):
-        """Override to call deleted event."""
-        pass
 
     def is_orphaned(self):
         """
@@ -403,6 +400,112 @@ class Metanode(object):
         result['dynamic_attr'] = dynamic_attr
 
         return json.dumps(result) if json_format else result
+
+    def created_event(self):
+        '''
+        Create user events for attribute changes and node renames.
+        '''
+        sel_list = om2.MSelectionList()
+        sel_list.add(self.node.name())
+        m_obj = sel_list.getDependNode(0)
+        if self.uuid not in self.events:
+            # Attribute
+            attribute_callback = om2.MNodeMessage.addAttributeChangedCallback(m_obj, self._attribute_changed)
+            om2.MUserEventMessage.registerUserEvent(self.attr_user_event)
+            # Name
+            name_callback = om2.MNodeMessage.addNameChangedCallback(m_obj, self._nameChanged)
+            om2.MUserEventMessage.registerUserEvent(self.name_user_event)
+
+            self.events[self.uuid] = {self.attr_user_event, self.name_user_event}
+            self.callbacks[self.uuid] = {attribute_callback, name_callback}
+
+    def deleted_event(self):
+        '''
+        Delete all callbacks of associated node.
+        '''
+        for callback in self.callbacks[self.uuid]:
+            om2.MMessage.removeCallback(callback)
+        self.callbacks.pop(self.uuid, None)
+        for event in self.events[self.uuid]:
+            om2.MUserEventMessage.deregisterUserEvent(event)
+        self.events.pop(self.uuid, None)
+
+    def _attribute_changed(self, attribute_message, plug_dst, plug_scr, *args):
+        # Message attribute edits
+        if attribute_message & om2.MNodeMessage.kOtherPlugSet:
+            input_uuid = om2.MFnDependencyNode(plug_scr.node()).uuid()
+            if plug_dst.isElement:
+                plug_dst = plug_dst.array()
+            if attribute_message & om2.MNodeMessage.kConnectionMade:
+                om2.MUserEventMessage.postUserEvent(self.attr_user_event,
+                                                    (self.uuid, plug_dst.partialName(), input_uuid, True))
+            elif attribute_message & om2.MNodeMessage.kConnectionBroken:
+                om2.MUserEventMessage.postUserEvent(self.attr_user_event,
+                                                    (self.uuid, plug_dst.partialName(), input_uuid, False))
+        # Data attribute edits
+        elif attribute_message & om2.MNodeMessage.kAttributeSet:
+            dst_attribute = plug_dst.attribute()
+            dst_type = dst_attribute.apiType()
+            if plug_dst.isElement:
+                attr_name = plug_dst.array().partialName()
+                index = plug_dst.logicalIndex()
+            else:
+                attr_name = plug_dst.partialName()
+                index = None
+            if dst_type == om2.MFn.kTypedAttribute:
+                om2.MUserEventMessage.postUserEvent(self.attr_user_event,
+                                                    (self.uuid, attr_name, plug_dst.asString(), index))
+            elif dst_type == om2.MFn.kNumericAttribute:
+                dstUnitType = om2.MFnNumericAttribute(dst_attribute).numericType()
+                if dstUnitType == om2.MFnNumericData.kBoolean:
+                    om2.MUserEventMessage.postUserEvent(self.attr_user_event,
+                                                        (self.uuid, attr_name, plug_dst.asBool(), index))
+                elif dstUnitType in {om2.MFnNumericData.kFloat, om2.MFnNumericData.kDouble, om2.MFnNumericData.kAddr}:
+                    om2.MUserEventMessage.postUserEvent(self.attr_user_event,
+                                                        (self.uuid, attr_name, plug_dst.asDouble(), index))
+                elif dstUnitType in {om2.MFnNumericData.kShort, om2.MFnNumericData.kInt,
+                                     om2.MFnNumericData.kLong, om2.MFnNumericData.kByte}:
+                    om2.MUserEventMessage.postUserEvent(self.attr_user_event,
+                                                        (self.uuid, attr_name, plug_dst.asShort(), index))
+
+    def _nameChanged(self, *args):
+        om2.MUserEventMessage.postUserEvent(self.name_user_event, (self.uuid, args[1], self.name))
+
+    def subscribe_attr(self, func):
+        '''
+        Subscribe function to attribute changes. The data will come back as a tuple when changes are made.
+        Message attribute changes will be;
+        (meta_uuid(unicode), attribute_name(unicode), connected_node_uuid(unicode), connectionState(bool))
+        while data attributes will be;
+        (meta_uuid(unicode), attribute_name(unicode), new_value(attribute type), index(int or None)).
+
+        :param func: function to call when attributes updated.
+        :return long: Index reference to callback.
+        '''
+        index = om2.MUserEventMessage.addUserEventCallback(self.attr_user_event, func)
+        self.callbacks[self.uuid].add(index)
+        return index
+
+    def subscribe_name(self, func):
+        '''
+        Subscribe function to node name changes. The data will be;
+        (meta_uuid(unicode), old_name(unicode), new_name(unicode))
+
+        :param func: function to call when name changes
+        :return long: index reference to callback that can be used with unsubscribe call.
+        '''
+        index = om2.MUserEventMessage.addUserEventCallback(self.name_user_event, func)
+        self.callbacks[self.uuid].add(index)
+        return index
+
+    def unsubscribe(self, callback):
+        '''
+        Remove callback for subscribed event.
+
+        :param long callback: Index identifier for callback to remove.
+        '''
+        self.callbacks[self.uuid].remove(callback)
+        om2.MMessage.removeCallback(callback)
 
     @property
     def name(self):
