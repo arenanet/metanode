@@ -13,7 +13,9 @@ from meta.config import *
 
 
 class Register(type):
-    """Meta type for tracking all Metanode classes in the import path."""
+    """
+    Meta type for tracking all Metanode classes in the import path.
+    """
     __meta_types__ = {}
 
     def __init__(cls, *args, **kwargs):
@@ -21,8 +23,6 @@ class Register(type):
         fully_qualified = cls.__module__ + '.' + cls.__name__
         cls.__class__.__meta_types__[fully_qualified] = cls
         cls.meta_type = fully_qualified
-        cls.events = dict()
-        cls.callbacks = dict()
 
 
 class Metanode(object):
@@ -31,6 +31,8 @@ class Metanode(object):
     """
     __metaclass__ = Register
     meta_version = 1
+    events = dict()
+    callbacks = dict()
 
     def __init__(self, node):
         """
