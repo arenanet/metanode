@@ -278,9 +278,9 @@ class Metanode(object):
                     # Sometimes network nodes connected to other network nodes just disappear when those
                     # nodes are deleted. Disconnect them first to avoid that
                     for sAttr in source:
-                        sAttr // attr
+                        pm.disconnectAttr(sAttr, attr)
                     for dAttr in destination:
-                        attr // dAttr
+                        pm.disconnectAttr(attr, dAttr)
                 else:
                     # Copy data values from old node to new.
                     if data is not None:
@@ -296,11 +296,11 @@ class Metanode(object):
                             could_not_set.append((attr_name, data))
                     # reconnect connections from old node to new
                     for sAttr in source:
-                        sAttr // attr
-                        sAttr >> new_metanode.node.attr(attr_name)
+                        pm.disconnectAttr(sAttr, attr)
+                        pm.connectAttr(sAttr, new_metanode.node.attr(attr_name))
                     for dAttr in destination:
-                        attr // dAttr
-                        new_metanode.node.attr(attr_name) >> dAttr
+                        pm.disconnectAttr(attr, dAttr)
+                        pm.connectAttr(new_metanode.node.attr(attr_name), dAttr)
             pm.delete(self.node)
         except Exception as exc:
             print exc
