@@ -415,7 +415,7 @@ class Metanode(object):
             attribute_callback = om2.MNodeMessage.addAttributeChangedCallback(m_obj, self._attribute_changed)
             om2.MUserEventMessage.registerUserEvent(self.attr_user_event)
             # Name
-            name_callback = om2.MNodeMessage.addNameChangedCallback(m_obj, self._nameChanged)
+            name_callback = om2.MNodeMessage.addNameChangedCallback(m_obj, self._name_changed)
             om2.MUserEventMessage.registerUserEvent(self.name_user_event)
 
             self.events[self.uuid] = {self.attr_user_event, self.name_user_event}
@@ -470,7 +470,7 @@ class Metanode(object):
                     om2.MUserEventMessage.postUserEvent(self.attr_user_event,
                                                         (self.uuid, attr_name, plug_dst.asShort(), index))
 
-    def _nameChanged(self, *args):
+    def _name_changed(self, *args):
         om2.MUserEventMessage.postUserEvent(self.name_user_event, (self.uuid, args[1], self.name))
 
     def subscribe_attr(self, func):
