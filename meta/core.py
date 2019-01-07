@@ -486,7 +486,7 @@ class Metanode(object):
         '''
         index = om2.MUserEventMessage.addUserEventCallback(self.attr_user_event, func)
         self.callbacks[self.uuid].add(index)
-        return index
+        return self.uuid, index
 
     def subscribe_name(self, func):
         '''
@@ -498,16 +498,19 @@ class Metanode(object):
         '''
         index = om2.MUserEventMessage.addUserEventCallback(self.name_user_event, func)
         self.callbacks[self.uuid].add(index)
-        return index
+        return self.uuid, index
 
-    def unsubscribe(self, callback):
+    @classmethod
+    def unsubscribe(cls, callback_data):
         '''
         Remove callback for subscribed event.
 
-        :param long callback: Index identifier for callback to remove.
+        :param tuple callback_data: UUID and Index identifier for callback to remove.
         '''
-        self.callbacks[self.uuid].remove(callback)
-        om2.MMessage.removeCallback(callback)
+        uuid, index = callback_data
+        if uuid in cls.callbacks:
+            cls.callbacks[uuid].remove(index)
+            om2.MMessage.removeCallback(index)
 
     @property
     def name(self):
