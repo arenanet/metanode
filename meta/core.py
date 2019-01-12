@@ -106,8 +106,7 @@ class Metanode(object):
         """
         return {}
 
-    @classmethod
-    def attr_dynamic(cls):
+    def attr_dynamic(self):
         """
         Set of attributes that need to be serialized but were not available during creation.
 
