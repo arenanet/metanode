@@ -84,7 +84,7 @@ class Metanode(object):
             network_node.attr(coreAttrName).set(value)
             network_node.attr(coreAttrName).setLocked(True)
 
-        for coreAttrName, coreAttrArgs in cls.attr().iteritems():
+        for coreAttrName, coreAttrArgs in cls.attr_class().iteritems():
             network_node.addAttr(coreAttrName, **coreAttrArgs)
 
         return cls(network_node)
@@ -98,7 +98,7 @@ class Metanode(object):
             (LINEAL_VERSION, {'at': 'short', 'value': cls.calculate_lineal_version()})])
 
     @classmethod
-    def attr(cls):
+    def attr_class(cls):
         """
         Set of attributes this Metaclass adds to its network node.
 
@@ -106,7 +106,8 @@ class Metanode(object):
         """
         return {}
 
-    def dynamic_attr(self):
+    @classmethod
+    def attr_dynamic(cls):
         """
         Set of attributes that need to be serialized but were not available during creation.
 
@@ -148,9 +149,9 @@ class Metanode(object):
 
         :return dict: dictionary of the attribute's creation kwargs.
         """
-        attr_data = self.attr().get(attr_name)
+        attr_data = self.attr_class().get(attr_name)
         if attr_data is None:
-            attr_data = self.dynamic_attr().get(attr_name)
+            attr_data = self.attr_dynamic().get(attr_name)
             if attr_data is None:
                 raise AttributeError(
                     "'{0}' is not a registered attribute on a Metanode of type {1}".format(attr_name, self.meta_type))
@@ -387,14 +388,14 @@ class Metanode(object):
         result = {'name': self.name, 'meta_type': self.meta_type, 'version': (self.node_version, self.node_lineal)}
 
         attributes = []
-        for attrName in self.attr():
+        for attrName in self.attr_class():
             serialized = self.serialize_attr(attrName)
             if serialized:
                 attributes.append(serialized)
         result['attr'] = attributes
 
         dynamic_attr = []
-        for attrName in self.dynamic_attr():
+        for attrName in self.attr_dynamic():
             serialized = self.serialize_attr(attrName)
             if serialized:
                 dynamic_attr.append(serialized)
@@ -649,7 +650,7 @@ def deserialize_metanode(data, node=None, json_format=True, verify_version=True,
         metanode.deserialize_attr(attr_data)
 
     if data['dynamic_attr']:
-        for attr_name, attr_args in metanode.dynamic_attr.iteritems():
+        for attr_name, attr_args in metanode.attr_dynamic.iteritems():
             metanode.node.addAttr(attr_name, **attr_args)
         for dynamic_data in data['dynamic_attr']:
             metanode.deserialize_attr(dynamic_data)
