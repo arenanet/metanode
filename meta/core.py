@@ -454,8 +454,15 @@ class Metanode(object):
                 attr_name = plug_dst.partialName()
                 index = None
             if dst_type == om2.MFn.kTypedAttribute:
-                om2.MUserEventMessage.postUserEvent(self.attr_user_event,
-                                                    (self.uuid, attr_name, plug_dst.asString(), index))
+                attr_type = om2.MFnTypedAttribute(dst_attribute).attrType()
+                if attr_type == om2.MFnData.kString:
+                    om2.MUserEventMessage.postUserEvent(self.attr_user_event,
+                                                        (self.uuid, attr_name, plug_dst.asString(), index))
+                elif attr_type == om2.MFnData.kStringArray:
+                    data_object = plug_dst.asMDataHandle().data()
+                    string_array = om2.MFnStringArrayData(data_object)
+                    om2.MUserEventMessage.postUserEvent(self.attr_user_event,
+                                                        (self.uuid, attr_name, string_array.array(), index))
             elif dst_type == om2.MFn.kNumericAttribute:
                 dstUnitType = om2.MFnNumericAttribute(dst_attribute).numericType()
                 if dstUnitType == om2.MFnNumericData.kBoolean:
