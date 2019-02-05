@@ -570,6 +570,10 @@ class SingletonMetanode(Metanode):
             metanode = cls.create(cls.__name__)
         return metanode
 
+    @classmethod
+    def create(cls):
+        return cls.super(SingletonMetanode, cls).create(cls.__name__)
+
 
 def get_metanode(node, *args, **kwargs):
     """
