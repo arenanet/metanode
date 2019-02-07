@@ -571,8 +571,8 @@ class SingletonMetanode(Metanode):
         return metanode
 
     @classmethod
-    def create(cls):
-        return cls.super(SingletonMetanode, cls).create(cls.__name__)
+    def create(cls, _):
+        pm.warning("{0} is a subclass of Singleton. Call '.instance()' to get this class.".format(cls.__name__))
 
 
 def get_metanode(node, *args, **kwargs):
