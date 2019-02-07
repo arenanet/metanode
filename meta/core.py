@@ -545,7 +545,7 @@ class Metanode(object):
 
         :return: Dict mapping versions to change descriptions
         """
-        return {1: 'Creation of Metanode class.'}
+        return {0: 'Creation of Metanode class.'}
 
 
 class SingletonMetanode(Metanode):
