@@ -1,4 +1,6 @@
-__all__ = ['config', 'core', 'manager']
+__all__ = ['core', 'manager', 'examples']
 
-import meta.core
-import meta.manager
+
+import core
+import manager
+import examples
