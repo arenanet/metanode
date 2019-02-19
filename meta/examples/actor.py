@@ -14,7 +14,7 @@ class Actor(meta.core.Metanode):
     '''
     A Metanode for saving skeletons.
     '''
-    metaversion = 1
+    meta_version = 1
 
     @classmethod
     def attr_class(cls):
@@ -37,6 +37,7 @@ class ActiveActor(meta.core.SingletonMetanode):
     '''
     Metanode Singleton for tracking the currently active Actor Metanode.
     '''
+    meta_version = 1
 
     @classmethod
     def __metanodeattributes__(cls):
