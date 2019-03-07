@@ -1,3 +1,5 @@
-__all__ = ['skeleton']
+__all__ = ['actor', 'rig', 'skeleton']
 
+import actor
+import rig
 import skeleton
