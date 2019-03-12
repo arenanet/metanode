@@ -25,4 +25,4 @@ module.MetanodeSubClass(network_node)
 
 * **Kyle Mistlin-Rude**
 * **Andrew Christophersen**
-* **Adamn Perin**
+* **Adam Perin**
